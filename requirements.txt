@@ -1,0 +1,5 @@
+httpx>=0.27
+beautifulsoup4>=4.12
+# Istege bagli: JS ile render edilen ekip sayfalari icin.
+# Kurulu degilse arac calisir, sadece --js yedegi devre disi kalir.
+playwright>=1.40
