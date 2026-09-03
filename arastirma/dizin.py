@@ -40,8 +40,23 @@ DIZINLER: dict[str, Dizin] = {
                  "site adresi VERMEZ — domaini domain.py bulur."),
 }
 
-# Uye adresinin sonundaki sehir dilimi: ".../hoop-recruitment-ltd-cardiff"
-SEHIR_DESENI = re.compile(r"-([a-z]+)$")
+# Uye adresi "<firma-adi>-<sehir>" seklinde ama ayirici yok. Son tireden
+# sonrasini almak yetmiyor:
+#   "...-tunbridge-wells"        -> sehir "wells", firma adinda "Tunbridge" kaliyor
+#   "advanced-resource-managers-it-ltd" -> sehir "ltd" (hic sehir yok)
+#   "...-welwyn-garden-city"     -> sehir "city"
+# Yanlis sehir mail metnine sizerse "Ltd merkezli ekibiniz" gibi bir cumle cikar.
+COK_KELIMELI_SEHIRLER = [
+    "tunbridge-wells", "milton-keynes", "sutton-coldfield", "welwyn-garden-city",
+    "kingston-upon-thames", "newcastle-under-lyme", "newcastle-upon-tyne",
+    "stoke-on-trent", "stratford-upon-avon", "burton-upon-trent", "burton-trent",
+    "henley-on-thames", "weston-super-mare", "bury-st-edmunds", "st-albans",
+    "leamington-spa", "hemel-hempstead", "high-wycombe", "central-milton-keynes",
+    "walton-thames", "shepperton-thames", "ashby-de-la-zouch",
+]
+# Sirket son eki sehir olamaz
+SEHIR_OLAMAZ = {"ltd", "limited", "llp", "plc", "inc", "uk", "group", "services",
+                "solutions", "recruitment", "consulting", "partners", "co"}
 
 # Nis tahmini firma ADINDAN yapilir, beyan edilen sektorden degil.
 # Bu bir YAKLASIKTIR: "care" kelimesi "Careers" icinde de gecer.
@@ -67,8 +82,19 @@ class Uye:
     nisler: list[str]
 
 
-def _dilimden_ad(dilim: str, sehir: str) -> str:
-    govde = dilim[: -(len(sehir) + 1)] if sehir and dilim.endswith("-" + sehir) else dilim
+def _sehir_ayir(dilim: str) -> tuple[str, str]:
+    """Dilimi (firma_adi, sehir) olarak boler. Sehir cikmazsa sehir bos doner —
+    uydurmak yerine bos birakmak dogru davranistir."""
+    for s in COK_KELIMELI_SEHIRLER:
+        if dilim.endswith("-" + s):
+            return dilim[: -(len(s) + 1)], s
+    m = re.search(r"-([a-z]+)$", dilim)
+    if m and m.group(1) not in SEHIR_OLAMAZ:
+        return dilim[: m.start()], m.group(1)
+    return dilim, ""
+
+
+def _dilimden_ad(govde: str) -> str:
     return govde.replace("-", " ").title()
 
 
@@ -98,10 +124,9 @@ def uyeleri_getir(istemci: Istemci, dizin_kodu: str = "REC") -> tuple[list[Uye],
 
     uyeler = []
     for dilim in dilimler:
-        m = SEHIR_DESENI.search(dilim)
-        sehir = m.group(1) if m else ""
+        govde, sehir = _sehir_ayir(dilim)
         nisler = [n for n, p in NIS_DESENLERI.items() if re.search(p, dilim)]
-        uyeler.append(Uye(dilim=dilim, ad=_dilimden_ad(dilim, sehir),
+        uyeler.append(Uye(dilim=dilim, ad=_dilimden_ad(govde),
                           sehir=sehir, nisler=nisler))
     return uyeler, ""
 
