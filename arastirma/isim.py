@@ -77,6 +77,19 @@ def _temiz(ham: str) -> str:
     return " ".join(p).strip(" ,.;:-")
 
 
+# Gercek isim bu kelimelerin hicbiriyle BASLAMAZ. Sekil kuralindan gecen ama
+# hala baslik olan ifadeler bu sinavda kaliyor:
+#   "Who We Are / partner", "Why Choose Us / partner", "Awarded Oracle / partner"
+# Ucu de her kelimesi buyuk harfli oldugu icin sekil sinavini geciyordu.
+BASLAMAZ = {
+    "who", "why", "what", "how", "when", "where", "which", "our", "your",
+    "their", "we", "us", "all", "more", "view", "read", "get", "find", "meet",
+    "join", "contact", "learn", "discover", "explore", "start", "book",
+    "request", "download", "awarded", "trusted", "proud", "welcome", "about",
+    "the", "a", "an", "let", "see", "why", "need", "want", "ready", "looking",
+    "featured", "latest", "recent", "new", "top", "best", "free", "why",
+}
+
 # Isim SEKLI: her kelime buyuk harfle baslar, icinde cumle noktalamasi ya da
 # rakam yoktur. Anahtar kelime kara listesinden daha iyi genellesir.
 #
@@ -94,6 +107,8 @@ def _sekil_uygun(aday: str) -> bool:
         return False
     kelimeler = aday.replace(",", " ").split()
     if not kelimeler:
+        return False
+    if kelimeler[0].lower() in BASLAMAZ:
         return False
     for k in kelimeler:
         if k.lower() in PARCACIK:

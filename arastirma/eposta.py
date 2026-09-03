@@ -77,8 +77,13 @@ def _desen_tahmin(yerel_parcalar: list[str]) -> str:
             sayac["a.soyad"] += 1
         elif re.fullmatch(r"[a-z]+_[a-z]+", d):
             sayac["ad_soyad"] += 1
-        elif re.fullmatch(r"[a-z]{3,}[a-z]", d) and len(d) <= 9:
-            sayac["ad"] += 1
+        elif re.fullmatch(r"[a-z]+", d):
+            # Ayirici yok. "phil" ad, "amullett" ise a+mullett (bas harf + soyad).
+            # Ikisi ayirt edilemez: "amanda" da 6 harf, "amullett" de tek parca
+            # gorunuyor. Uzun bir yerel kisim varsa TUM kume supheli sayilir.
+            sayac["_uzun" if len(d) >= 8 else "ad"] += 1
+    if sayac.get("_uzun"):
+        return ""   # belirsiz — uydurma, cagiran taraf uyari verir
     if not sayac:
         return ""
     desen, kac = sayac.most_common(1)[0]
