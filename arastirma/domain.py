@@ -42,6 +42,53 @@ PARK_DESENI = re.compile(
 TLD_VARSAYILAN = (".co.uk", ".com", ".io")
 
 
+
+# Ulke sinyali: ayni isimde baska ulkede baska sirket olabilir.
+# Olculen hata: "Network IT Recruitment" (REC uyesi, Ingiltere) arandi,
+# networkit.com dondu — Los Angeles'ta bir IT servis sirketi. Sayfada
+# "network it" bitisik gectigi icin YUKSEK guven aldi.
+# "Connected IT Recruitment" (Manchester) -> connected-it.co.uk, Bradford'da
+# 10 kisilik donanim bayii. Isim ayni, sirket baska.
+UK_IZI = re.compile(
+    r"\+44|\(0\)\s?1|\b0[12]\d{2,3}[\s\-]?\d{3,4}[\s\-]?\d{3,4}\b|"
+    r"\b[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}\b|"          # posta kodu: BR1 1DE
+    r"companies house|registered in england|vat\s*(no|number)?\s*:?\s*gb", re.I)
+ABD_IZI = re.compile(r"\+1[\s\-]?8|1-8\d\d-|\b[A-Z]{2}\s\d{5}(-\d{4})?\b|"
+                     r"\b(california|texas|florida|new york|illinois)\b", re.I)
+
+
+def ulke_izi(metin_ham: str) -> str:
+    """Sayfanin hangi ulkeye ait oldugunu kabaca soyler: UK | ABD | ? """
+    uk, us = len(UK_IZI.findall(metin_ham)), len(ABD_IZI.findall(metin_ham))
+    if uk and uk > us:
+        return "UK"
+    if us and us > uk:
+        return "ABD"
+    return "?"
+
+
+# Ise alim ajansina OZGU kelimeler. "job" ve "career" burada YOK: her sirketin
+# altbilgisinde "careers" yazar, ayirt etmez. Bunlar yalnizca aday yerlestiren
+# bir sirkette bir arada bulunur.
+SEKTOR_TERIMLERI = (
+    "candidate", "vacanc", "job seeker", "jobseeker", "permanent", "temporary",
+    "placement", " cv ", "shortlist", "recruiter", "recruitment agency",
+    "apply now", "submit your cv", "register your cv", "browse jobs",
+    "search jobs", "hiring manager", "contract role", "day rate",
+)
+
+
+def sektor_skoru(metin_duz: str) -> int:
+    """Sayfada kac farkli ise-alim terimi geciyor.
+
+    Olculdu (8 site): ise alim ajansi OLMAYAN uc firma da 0 aldi —
+    connected-it.co.uk (donanim bayii), bureautechnicalservices.co.uk (denetim),
+    digitalskills.com (danismanlik). Gercek ajanslar 5, 7 ve 11 aldi.
+    Apps IT ve Stealth IT 1 aldi: gercek ajanslar ama ana sayfalari cok sade.
+    Bu yuzden esik konmaz — yalnizca SIFIR ceza sayilir, gerisi disari verilir.
+    """
+    return sum(1 for t in SEKTOR_TERIMLERI if t in metin_duz)
+
 @dataclass
 class DomainSonuc:
     firma: str
@@ -50,6 +97,7 @@ class DomainSonuc:
     guven: str = ""        # YUKSEK | ORTA | (bos)
     baslik: str = ""
     kanit: str = ""
+    ulke: str = ""
     denenen: int = 0
 
 
@@ -98,7 +146,8 @@ def _cozuluyor_mu(domain: str) -> bool:
         return False
 
 
-def dogrula(istemci: Istemci, domain: str, firma: str) -> tuple[str, str, str]:
+def dogrula(istemci: Istemci, domain: str, firma: str,
+            beklenen_ulke: str = "UK") -> tuple[str, str, str, str]:
     """Sayfayi acar ve bu domainin GERCEKTEN o firmaya ait oldugunu sinar.
 
     YUKSEK  firmanin ayirt edici iki kelimesi sayfada bitisik gecer
@@ -107,20 +156,33 @@ def dogrula(istemci: Istemci, domain: str, firma: str) -> tuple[str, str, str]:
             gozle bak
     (bos)   kanit yok, sonuc verilmez
 
-    Doner: (guven, baslik, kanit)
+    Doner: (guven, baslik, kanit, ulke)
     """
     y = istemci.getir(f"https://{domain}")
     if y is None or y.status_code != 200:
-        return "", "", ""
+        return "", "", "", ""
 
     ham = y.text
     baslik_e = re.search(r"<title[^>]*>(.*?)</title>", ham, re.I | re.S)
     baslik = re.sub(r"\s+", " ", baslik_e.group(1)).strip() if baslik_e else ""
     if PARK_DESENI.search(baslik):
-        return "", baslik, "park edilmis / satilik"
+        return "", baslik, "park edilmis / satilik", ""
 
-    metin = re.sub(r"<[^>]+>", " ", re.sub(r"(?s)<script.*?</script>", " ", ham))
-    metin = re.sub(r"[^a-z0-9]+", " ", metin.lower())
+    duz = re.sub(r"<[^>]+>", " ", re.sub(r"(?s)<script.*?</script>", " ", ham))
+    metin = re.sub(r"[^a-z0-9]+", " ", duz.lower())
+
+    # Isim tutmasi yetmez. Ayni isimde sirket baska ULKEDE ya da baska
+    # SEKTORDE olabilir; ikisi de olculdu ve ikisi de gerceklesti.
+    ulke = ulke_izi(duz)
+    yanlis_ulke = beklenen_ulke and ulke != "?" and ulke != beklenen_ulke
+    skor = sektor_skoru(metin)
+
+    notlar = ""
+    if yanlis_ulke:
+        notlar += f" — DIKKAT: sayfa {ulke} gorunuyor, {beklenen_ulke} bekleniyordu"
+    if skor == 0:
+        notlar += " — DIKKAT: sayfada hic ise alim dili yok, bu firma ajans olmayabilir"
+    supheli = yanlis_ulke or skor == 0
 
     kel = [k.lower() for k in _kelimeler(firma)]
     ayirt = [k for k in kel if len(k) >= 3 and k not in GENEL]
@@ -128,17 +190,24 @@ def dogrula(istemci: Istemci, domain: str, firma: str) -> tuple[str, str, str]:
     if len(kel) >= 2:
         ifade = " ".join(kel[:2])
         if ifade in metin or ifade in baslik.lower():
-            return "YUKSEK", baslik, f"'{ifade}' sayfada bitisik geciyor"
+            # Isim tutuyor ama supheliyse YUKSEK verilmez: "Network IT"
+            # hem Ingiltere'de hem Los Angeles'ta, "Connected IT" hem
+            # Manchester'da ajans hem Bradford'da donanim bayii olarak var.
+            return ("ORTA" if supheli else "YUKSEK", baslik,
+                    f"'{ifade}' sayfada bitisik geciyor · sektor skoru {skor}" + notlar,
+                    ulke)
 
     isim_var = [k for k in ayirt if k in metin]
     is_var = any(i in metin for i in ISE_ALIM_IZI)
     if isim_var and is_var:
-        return "ORTA", baslik, f"ayirt edici '{isim_var[0]}' + ise alim izi"
-    return "", baslik, "kanit yok"
+        return ("" if supheli else "ORTA", baslik,
+                f"ayirt edici '{isim_var[0]}' · sektor skoru {skor}" + notlar, ulke)
+    return "", baslik, f"kanit yok · sektor skoru {skor}", ulke
 
 
 def domain_bul(istemci: Istemci, firma: str,
-               tldler: tuple[str, ...] = TLD_VARSAYILAN) -> DomainSonuc:
+               tldler: tuple[str, ...] = TLD_VARSAYILAN,
+               beklenen_ulke: str = "UK") -> DomainSonuc:
     """Adaylari sirayla dener, ilk YUKSEK'i alir; yoksa en iyi ORTA'yi doner."""
     s = DomainSonuc(firma=firma)
     en_iyi: DomainSonuc | None = None
@@ -146,14 +215,16 @@ def domain_bul(istemci: Istemci, firma: str,
         if not _cozuluyor_mu(aday):
             continue
         s.denenen += 1
-        guven, baslik, kanit = dogrula(istemci, aday, firma)
+        guven, baslik, kanit, ulke = dogrula(istemci, aday, firma, beklenen_ulke)
         if guven == "YUKSEK":
-            s.domain, s.guven, s.baslik, s.kanit = aday, guven, baslik, kanit
+            s.domain, s.guven, s.baslik, s.kanit, s.ulke = \
+                aday, guven, baslik, kanit, ulke
             s.mx = mx_kontrol(aday)
             return s
         if guven == "ORTA" and en_iyi is None:
             en_iyi = DomainSonuc(firma=firma, domain=aday, guven=guven,
-                                 baslik=baslik, kanit=kanit, denenen=s.denenen)
+                                 baslik=baslik, kanit=kanit, ulke=ulke,
+                                 denenen=s.denenen)
     if en_iyi:
         en_iyi.denenen = s.denenen
         en_iyi.mx = mx_kontrol(en_iyi.domain)
