@@ -12,6 +12,9 @@ Iki gercek olaydan dogdu.
 
 Cikarilan kural: **adresin domaini sitenin domaininden AYRI dogrulanir.**
 Bulunan her adresin kendi domaini icin MX sorulur, varsayim yapilmaz.
+
+26 firmalik gercek bir kosuda 7 uyusmazlik cikti — yani her dort siteden
+birinde mail baska bir domainde. Tahmin etmek dortte bir bounce demekti.
 """
 from __future__ import annotations
 
@@ -29,12 +32,23 @@ ILETISIM_YOLLARI = [
 
 EPOSTA_DESENI = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
-# Site kodunda gecen ama insana ait olmayan adresler
-COP = re.compile(r"(sentry|wixpress|example|domain|yourname|@2x|\.png|\.jpg|"
-                 r"\.gif|\.svg|\.webp|sentry\.io|godaddy)", re.I)
+# Site kodunda gecen ama insana ait olmayan adresler.
+# "beispiel@email.com" (Almanca "ornek") ilk surumde gercek adres sayildi:
+# sablon metni gercek veri gibi disari cikti. Yer tutucu DOMAINLERI de ele.
+COP = re.compile(r"(sentry|wixpress|example|beispiel|exemple|ejemplo|ornek|"
+                 r"yourname|yourdomain|firstname|lastname|@2x|godaddy|"
+                 r"\.png|\.jpg|\.gif|\.svg|\.webp)", re.I)
+
+YER_TUTUCU_DOMAIN = {"email.com", "domain.com", "example.com", "example.org",
+                     "yourdomain.com", "company.com", "test.com", "site.com"}
+
+# Rol kutusu — bir kisiye ait degil, desen cikarirken sayilmamali.
+# "inspection@..." ilk surumde kisi adresi sanildi ve deseni "ad" gosterdi.
 KUTU_ADLARI = {"info", "contact", "hello", "enquiries", "enquiry", "sales",
                "admin", "office", "mail", "recruitment", "careers", "jobs",
-               "support", "team", "hi"}
+               "support", "team", "hi", "inspection", "accounts", "finance",
+               "hr", "marketing", "press", "legal", "privacy", "training",
+               "talent", "apply", "cv", "help", "service", "bookings", "hire"}
 
 
 @dataclass
@@ -49,7 +63,11 @@ class EpostaSonuc:
 
 
 def _desen_tahmin(yerel_parcalar: list[str]) -> str:
-    """Kisi adreslerinin yerel kismindan yaziliş desenini cikarir."""
+    """Kisi adreslerinin yerel kismindan yazilis desenini cikarir.
+
+    Tek ornekten desen cikarmaz: bir adam "chris@" ise sirketin deseni "ad"
+    olmayabilir, sadece Chris'in adresi kisadir. Iki ornek sart.
+    """
     sayac: Counter[str] = Counter()
     for y in yerel_parcalar:
         d = y.lower()
@@ -59,9 +77,12 @@ def _desen_tahmin(yerel_parcalar: list[str]) -> str:
             sayac["a.soyad"] += 1
         elif re.fullmatch(r"[a-z]+_[a-z]+", d):
             sayac["ad_soyad"] += 1
-        elif re.fullmatch(r"[a-z]{4,}", d):
+        elif re.fullmatch(r"[a-z]{3,}[a-z]", d) and len(d) <= 9:
             sayac["ad"] += 1
-    return sayac.most_common(1)[0][0] if sayac else ""
+    if not sayac:
+        return ""
+    desen, kac = sayac.most_common(1)[0]
+    return desen if kac >= 2 else ""
 
 
 def adres_tara(istemci: Istemci, domain: str, azami_sayfa: int = 6) -> EpostaSonuc:
@@ -77,9 +98,10 @@ def adres_tara(istemci: Istemci, domain: str, azami_sayfa: int = 6) -> EpostaSon
             continue
         bakilan += 1
         for e in EPOSTA_DESENI.findall(y.text):
-            if COP.search(e):
+            ad = e.strip(".,;:").lower()
+            if COP.search(ad) or ad.split("@", 1)[-1] in YER_TUTUCU_DOMAIN:
                 continue
-            gorulen.add(e.strip(".,;:").lower())
+            gorulen.add(ad)
 
     s.adresler = sorted(gorulen)
     if not s.adresler:
@@ -106,6 +128,9 @@ def adres_tara(istemci: Istemci, domain: str, azami_sayfa: int = 6) -> EpostaSon
     s.ornekler = kisisel[:5]
     if not kisisel:
         s.uyarilar.append("sadece genel kutu (info@ vb.) var, kisiye ait adres yok")
+    elif not s.desen:
+        s.uyarilar.append("desen cikarilamadi (tek ornek ya da karisik) — "
+                          "adres uydurma, info@ + ilk satirda isim kullan")
     return s
 
 
