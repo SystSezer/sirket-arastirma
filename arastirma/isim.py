@@ -53,7 +53,11 @@ KARA_LISTE = {
 YASAK_KELIME = {"it", "ict", "search", "recruitment", "recruiter", "bureau",
                 "consultancy", "management", "executive", "wat", "een", "hoe",
                 "waarom", "onze", "meer", "solutions", "services", "group",
-                "technology", "digital", "the", "and", "mission", "vision"}
+                "technology", "digital", "the", "and", "mission", "vision",
+                # Musteri REFERANSLARINDA gecen firma adlari kisi saniliyordu:
+                # "Salmon Software - cto", "Blue Lynx - partner"
+                "software", "systems", "technologies", "media", "labs", "studio",
+                "ventures", "capital", "holdings", "consulting", "partners"}
 KUYRUK = {"managing", "director", "partner", "founder", "owner", "consultant",
           "manager", "directeur", "oprichter", "eigenaar", "head"}
 
@@ -70,12 +74,40 @@ def _temiz(ham: str) -> str:
     p = ham.split()
     while p and p[-1].lower().strip(",.-") in KUYRUK:
         p.pop()
-    return " ".join(p)
+    return " ".join(p).strip(" ,.;:-")
+
+
+# Isim SEKLI: her kelime buyuk harfle baslar, icinde cumle noktalamasi ya da
+# rakam yoktur. Anahtar kelime kara listesinden daha iyi genellesir.
+#
+# Olculen gerekce: ilk surumde ekip sayfasi BASLIKLARI kisi sanildi —
+# "Why use Intrinsic? / coo", "Plans your AI strategy. / cto",
+# "Questions founders ask. / cto", "Matched in 7 days. / cto".
+# Dordu de kelime sayisi ve kara liste sinavindan geciyordu; hicbiri bu
+# sinavdan gecemez, cunku ortalarinda kucuk harfle baslayan kelime var.
+PARCACIK = {"van", "der", "den", "de", "ter", "te", "op", "del", "della",
+            "di", "da", "dos", "bin", "al", "von", "zu"}
+
+
+def _sekil_uygun(aday: str) -> bool:
+    if re.search(r"[?!:;]|\.\s|\.$|\d", aday):
+        return False
+    kelimeler = aday.replace(",", " ").split()
+    if not kelimeler:
+        return False
+    for k in kelimeler:
+        if k.lower() in PARCACIK:
+            continue
+        if not k[:1].isupper():
+            return False
+    return True
 
 
 def _isim_mi(aday: str, sirket: str = "") -> bool:
     d = aday.lower().strip()
     if len(aday) < 5 or d in KARA_LISTE or UNVAN_DESENI.search(aday):
+        return False
+    if not _sekil_uygun(aday):
         return False
     p = aday.split()
     if any(x.lower().strip(",.-?") in YASAK_KELIME for x in p):

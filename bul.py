@@ -1,8 +1,11 @@
 """CLI — sirket arastirma boru hatti.
 
-Uc mod:
+Alti mod:
     isim    domainlerden karar verici cikar (sicil once, sonra site, sonra insan)
     kesif   nis + bolge -> hedef firma listesi
+    dizin   sektor birligi uye dizininden hedef listesi (kesif icin DOGRU kapi)
+    domain  firma adindan domain bul ve gercekten o firma mi diye dogrula
+    adres   siteden yayinlanmis e-posta adreslerini ve desenini cikar
     ulke    bir ulkede ismin nereden bulunacagini anlat
 
 Ornekler:
@@ -16,7 +19,9 @@ from __future__ import annotations
 import argparse
 import csv
 
-from arastirma import (NISLER, Firma, Istemci, bosluk_bul, etiket, mx_kontrol,
+from arastirma import (DIZINLER, NISLER, Firma, Istemci, adres_tara, bosluk_bul,
+                       domain_bul, etiket, mx_kontrol, nis_dagilimi, sec,
+                       uyeleri_getir,
                        osm_ara, puanla, rapor, sicilden_isim, siteden_isim,
                        zincir_ele, ULKELER)
 
@@ -133,6 +138,105 @@ def komut_kesif(a: argparse.Namespace) -> None:
     print(f"cikti: {a.cikti}\nSatis argumani: {nis.teklif}")
 
 
+
+
+def komut_domain(a: argparse.Namespace) -> None:
+    """Firma adlarindan domain bulur. Sicil ad verir, site adresi vermez."""
+    adlar = list(a.adlar)
+    if a.dosya:
+        with open(a.dosya, encoding="utf-8") as f:
+            adlar += [s.strip() for s in f if s.strip() and not s.startswith("#")]
+    if not adlar:
+        raise SystemExit("en az bir firma adi ver ya da --dosya kullan")
+
+    istemci, satirlar = Istemci(), []
+    yuksek = orta = 0
+    try:
+        for i, ad in enumerate(adlar, 1):
+            s = domain_bul(istemci, ad)
+            if s.guven == "YUKSEK":
+                yuksek += 1
+            elif s.guven == "ORTA":
+                orta += 1
+            print(f"[{i}/{len(adlar)}] {ad[:36]:38} "
+                  f"{(s.domain or '-'):32} {s.guven or '':7} {s.baslik[:40]}")
+            if s.guven == "ORTA":
+                print(f"      GOZLE DOGRULA: {s.kanit}")
+            satirlar.append([ad, s.domain, s.guven, s.mx, s.baslik, s.kanit, s.denenen])
+    finally:
+        istemci.kapat()
+
+    with open(a.cikti, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["firma", "domain", "guven", "mx", "baslik", "kanit", "denenen"])
+        w.writerows(satirlar)
+    print(f"\n{yuksek} YUKSEK · {orta} ORTA (gozle bak) · "
+          f"{len(adlar) - yuksek - orta} bulunamadi · cikti: {a.cikti}")
+
+
+def komut_adres(a: argparse.Namespace) -> None:
+    """Yayinlanmis e-posta adreslerini ve desenini cikarir."""
+    hedefler = list(a.domainler)
+    if a.dosya:
+        with open(a.dosya, encoding="utf-8") as f:
+            hedefler += [s.strip() for s in f if s.strip() and not s.startswith("#")]
+    if not hedefler:
+        raise SystemExit("en az bir domain ver ya da --dosya kullan")
+
+    istemci, satirlar = Istemci(), []
+    try:
+        for i, h in enumerate(hedefler, 1):
+            d = h.split("//")[-1].split("/")[0].removeprefix("www.")
+            s = adres_tara(istemci, d)
+            print(f"[{i}/{len(hedefler)}] {d:32} {len(s.adresler):3} adres · "
+                  f"desen: {s.desen or '-':10} MX: {s.mx[:20]}")
+            for o in s.ornekler:
+                print(f"      {o}")
+            for u in s.uyarilar:
+                print(f"      !! {u}")
+            satirlar.append([d, s.mail_domaini, s.mx, s.desen, len(s.adresler),
+                             "; ".join(s.ornekler), " | ".join(s.uyarilar)])
+    finally:
+        istemci.kapat()
+
+    with open(a.cikti, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["domain_site", "mail_domaini", "mx", "desen", "adres_sayisi",
+                    "ornekler", "uyarilar"])
+        w.writerows(satirlar)
+    print(f"\ncikti: {a.cikti}")
+
+
+def komut_dizin(a: argparse.Namespace) -> None:
+    """Sektor birligi uye dizininden hedef listesi."""
+    istemci = Istemci()
+    try:
+        uyeler, uyari = uyeleri_getir(istemci, a.dizin)
+    finally:
+        istemci.kapat()
+    if uyari:
+        raise SystemExit(f"!! {uyari}")
+
+    print(f"{DIZINLER[a.dizin.upper()].ad}: {len(uyeler)} uye\n")
+    if a.dagilim:
+        print("Nis dagilimi (firma ADINDAN tahmin — yaklasiktir):")
+        for n, s in nis_dagilimi(uyeler):
+            print(f"  {n:14} {s:5}")
+        return
+
+    secilen = sec(uyeler, sehirler=a.sehir, nis=a.nis, haric=a.haric)
+    print(f"{len(secilen)} uye eslesti"
+          + (f" (sehir: {', '.join(a.sehir)})" if a.sehir else "")
+          + (f" (nis: {a.nis})" if a.nis else "") + "\n")
+    with open(a.cikti, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["ad", "sehir", "nisler", "dilim"])
+        for u in secilen[:a.limit]:
+            print(f"  {u.ad[:44]:46} {u.sehir:12} {', '.join(u.nisler)}")
+            w.writerow([u.ad, u.sehir, "; ".join(u.nisler), u.dilim])
+    print(f"\ncikti: {a.cikti}")
+    print("Sonraki adim: python bul.py domain --dosya <adlar.txt>")
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Sirket arastirma boru hatti")
     alt = ap.add_subparsers(dest="komut", required=True)
@@ -154,6 +258,30 @@ def main() -> None:
     k.add_argument("--js", action="store_true")
     k.add_argument("--cikti", default="kesif.csv")
     k.set_defaults(fn=komut_kesif)
+
+    dm = alt.add_parser("domain", help="firma adindan domain bul ve dogrula")
+    dm.add_argument("adlar", nargs="*")
+    dm.add_argument("--dosya")
+    dm.add_argument("--cikti", default="domainler.csv")
+    dm.set_defaults(fn=komut_domain)
+
+    ad = alt.add_parser("adres", help="siteden e-posta adresi ve desen cikar")
+    ad.add_argument("domainler", nargs="*")
+    ad.add_argument("--dosya")
+    ad.add_argument("--cikti", default="adresler.csv")
+    ad.set_defaults(fn=komut_adres)
+
+    dz = alt.add_parser("dizin", help="sektor birligi uye dizininden hedef listesi")
+    dz.add_argument("--dizin", default="REC", help=", ".join(DIZINLER))
+    dz.add_argument("--sehir", nargs="*", help="ornek: london manchester")
+    dz.add_argument("--nis", help="saglik, egitim, lojistik, bilisim, ...")
+    dz.add_argument("--haric", nargs="*", default=["hays", "reed", "adecco", "randstad",
+                                                   "manpower", "bae-systems", "brook-street"],
+                    help="devleri ele — zincire satis yapilmaz")
+    dz.add_argument("--dagilim", action="store_true", help="nis dagilimini yaz ve cik")
+    dz.add_argument("--limit", type=int, default=60)
+    dz.add_argument("--cikti", default="dizin.csv")
+    dz.set_defaults(fn=komut_dizin)
 
     u = alt.add_parser("ulke", help="bir ulkede isim nereden bulunur")
     u.add_argument("kod", nargs="?")

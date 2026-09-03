@@ -154,3 +154,124 @@ dışı kalır. MX doğrulaması için sistemde `nslookup` bulunmalıdır.
 
 Güven seviyeleri: `YUKSEK` (resmî sicil ya da anlamsal işaretleme) ·
 `ORTA` (başlık deseni) · `DUSUK` (sezgisel — gözle doğrula).
+
+---
+
+## Keşif için doğru kapı: birlik dizini, sicil değil
+
+`kesif` ilk sürümde OpenStreetMap'e, sonra Companies House isim aramasına
+dayanıyordu. İkincisi ölçüldü ve **yanlış kapı olduğu çıktı.**
+
+"Londra + Manchester'da teknoloji işe alım ajansı" araması (SIC 78109/78300, aktif):
+
+| Aşama | Kalan |
+|---|---|
+| Companies House isim araması, ham | 208 |
+| Sanal ofis adresi elendikten sonra | 69 |
+| Sitesi doğrulanabilen | **~6 (%9)** |
+
+Sebep yapısal: **sicil TÜM şirketleri içerir**, ticaret yapmayan tek kişilik
+kabukları da. 208 sonucun büyük kısmı 71-75 Shelton Street gibi şirket kurulum
+adreslerine kayıtlıydı.
+
+Sektör birliği dizininde oran tersine döner, çünkü üyelik ücretli ve denetimlidir —
+liste zaten filtrelenmiş gelir. REC'in 4.426 üyesinin hepsi gerçekten ticaret yapıyor.
+
+**Kural: keşif için birlik dizini, doğrulama için resmî sicil.**
+
+```bash
+python bul.py dizin --dagilim                          # hangi nişte kaç ajans var
+python bul.py dizin --sehir london manchester --nis bilisim
+python bul.py domain --dosya adlar.txt                 # ada karşılık domain
+python bul.py adres --dosya domainler.txt              # adres + desen + MX
+```
+
+### REC üye dağılımı (ölçüldü, 4.426 üye)
+
+| Niş | Ajans | | Niş | Ajans |
+|---|---|---|---|---|
+| Sağlık / bakım | 384 | | Bilişim | 70 |
+| Eğitim | 353 | | Finans | 69 |
+| Lojistik | 173 | | İnşaat | 49 |
+| İK / talent | 163 | | Konaklama | 48 |
+
+*Niş tahmini firma **adından** yapılır, beyan edilen sektörden değil — yaklaşıktır.*
+
+---
+
+## Domain bulma: DNS'te var olmak "onun" demek değil
+
+`domain` komutu firma adından aday domain üretir, sonra sayfayı açıp gerçekten
+o firma mı diye bakar. İkinci adım olmadan sonuç işe yaramaz:
+
+| Aranan firma | DNS'te çözülen | Sahibi kim |
+|---|---|---|
+| Every Cloud IT Recruitment | `everycloud.com` | Hornetsecurity (Alman güvenlik firması) |
+| Data Base Medics | `database.com` | Salesforce |
+| AV Tech Smart Solutions | `av-tech.co.uk` | görsel-işitsel kurulum firması |
+
+İlk sürümde doğrulama "sayfada firma adından bir kelime + işe alım kelimesi geçsin"
+idi. Her kurumsal sitenin altbilgisinde zaten "careers" yazdığı için üçü de geçti.
+
+Şimdi **ikili sonuç yerine güven seviyesi** dönüyor:
+
+- `YUKSEK` — firmanın ayırt edici iki kelimesi sayfada bitişik geçiyor
+- `ORTA` — tek kelime + işe alım izi; muhtemelen doğru, gözle bak
+- boş — kanıt yok, sonuç verilmez
+
+Sayfa başlığı her zaman dışarı verilir. Kararı insan verir.
+
+---
+
+## Adres bulma: mail domaini site domaininden AYRI doğrulanır
+
+İki gerçek olaydan doğdu.
+
+**Signify Technology** ekip sayfası 41 çalışanın adresini açıkça yayınlıyordu, ama
+site `signifytechnology.com` iken mailler `signify-tech.com` üzerindeydi.
+
+**DIQQ** iletişim sayfasında `info@qgroup.nl` yazıyordu. O domainin hiç MX kaydı yok;
+gönderilen mail 550 5.1.1 ile geri döndü.
+
+10 firmalık gerçek bir koşuda **3 domain uyuşmazlığı** yakalandı:
+
+| Site | Gerçek mail domaini |
+|---|---|
+| `cloudemployee.co.uk` | `cloudemployee.io` |
+| `spheredigitalrecruitment.com` | `spherelondon.co.uk` |
+| `prism-digital.co.uk` | `prism-digital.com` |
+
+Üçüne de site domaininden mail atılsa geri dönerdi. Desen bilinmiyorsa `adres_uret`
+**boş döner** — tahmin edip göndermek bounce ve itibar kaybı demektir.
+
+---
+
+## İsim ayıklama: kelime sayısı değil, şekil
+
+Sezgisel katman ekip sayfası **başlıklarını** kişi sanıyordu:
+
+```
+Why use Intrinsic?      → coo
+Plans your AI strategy. → cto
+Questions founders ask. → cto
+Matched in 7 days.      → cto
+```
+
+Dördü de "2-4 kelime + kara listede yok" sınavından geçiyordu. Eklenen kural
+anahtar listesi değil, **şekil**: gerçek isimde her kelime büyük harfle başlar,
+içinde cümle noktalaması ve rakam bulunmaz. Dördü de bu sınavdan kaldı; aynı
+koşuda daha önce hiç isim vermeyen bir firmada üç gerçek isim çıktı.
+
+Şekil kuralı kara listeden iyidir çünkü görmediği örneğe de uygular.
+
+### Yerel ayar tuzağı — Python'da yok, ama bilmekte fayda var
+
+Aynı normalleştirme PowerShell'de yazıldığında `INTRINSIC` → `ntrns` oldu.
+Sebep: `-replace` varsayılan olarak büyük/küçük harf duyarsızdır ve duyarsız
+karşılaştırma işletim sisteminin kültürünü kullanır. Türkçe'de `I`'nın küçüğü
+`i` değil `ı`'dır, o da `a-z` aralığında değildir — regex her büyük I'yı
+"harf değil" sayıp sildi.
+
+Python'un `re` modülü kültüre bağlı değildir, yani bu kodda o tuzak yok. Ama aynı
+mantığı .NET, Java ya da kabuk betiğinde yazan biri için gerçek: **kod Londra'daki
+makinede çalışır, İstanbul'daki makinede sessizce bozulur.**
