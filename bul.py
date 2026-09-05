@@ -153,7 +153,7 @@ def komut_domain(a: argparse.Namespace) -> None:
     yuksek = orta = 0
     try:
         for i, ad in enumerate(adlar, 1):
-            s = domain_bul(istemci, ad)
+            s = domain_bul(istemci, ad, sektor=a.sektor)
             if s.guven == "YUKSEK":
                 yuksek += 1
             elif s.guven == "ORTA":
@@ -262,6 +262,7 @@ def main() -> None:
     dm = alt.add_parser("domain", help="firma adindan domain bul ve dogrula")
     dm.add_argument("adlar", nargs="*")
     dm.add_argument("--dosya")
+    dm.add_argument("--sektor", default="isealim", help="isealim | emlak")
     dm.add_argument("--cikti", default="domainler.csv")
     dm.set_defaults(fn=komut_domain)
 

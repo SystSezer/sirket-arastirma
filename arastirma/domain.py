@@ -34,9 +34,13 @@ SON_EKLER = {"limited", "ltd", "llp", "plc", "inc", "corp", "company", "the", "a
 ISE_ALIM_IZI = ("recruit", "talent", "candidat", "vacanc", "hiring", "staffing",
                 "headhunt", "placement", "consultan", "job", "career")
 
-# Satilik / park edilmis / bos domainler
+# Satilik / park edilmis / bos domainler.
+# DIKKAT: cıplak "for sale" KULLANILAMAZ — emlakci sitesinin basliginda zaten
+# "Properties for sale in ..." yazar. Bu desen once oyleydi ve butun emlakcilari
+# "satilik domain" sanip elerdi. Satilik olan DOMAIN'dir, mulk degil.
 PARK_DESENI = re.compile(
-    r"for sale|hugedomains|under\s?construction|parked|godaddy|sedo|"
+    r"(domain|website|site)\s+(name\s+)?(is\s+)?for sale|"
+    r"hugedomains|under\s?construction|parked|godaddy|sedo|"
     r"domain (is )?available|buy this domain|coming soon", re.I)
 
 TLD_VARSAYILAN = (".co.uk", ".com", ".io")
@@ -67,27 +71,38 @@ def ulke_izi(metin_ham: str) -> str:
     return "?"
 
 
-# Ise alim ajansina OZGU kelimeler. "job" ve "career" burada YOK: her sirketin
-# altbilgisinde "careers" yazar, ayirt etmez. Bunlar yalnizca aday yerlestiren
-# bir sirkette bir arada bulunur.
-SEKTOR_TERIMLERI = (
-    "candidate", "vacanc", "job seeker", "jobseeker", "permanent", "temporary",
-    "placement", " cv ", "shortlist", "recruiter", "recruitment agency",
-    "apply now", "submit your cv", "register your cv", "browse jobs",
-    "search jobs", "hiring manager", "contract role", "day rate",
-)
+# Sektore OZGU kelimeler. Jenerik olanlar bilerek disarida: her sirketin
+# altbilgisinde "careers" ya da "contact" yazar, ayirt etmez. Buradakiler
+# yalnizca o isi gercekten yapan sirkette bir arada bulunur.
+SEKTORLER: dict[str, tuple[str, ...]] = {
+    "isealim": (
+        "candidate", "vacanc", "job seeker", "jobseeker", "permanent", "temporary",
+        "placement", " cv ", "shortlist", "recruiter", "recruitment agency",
+        "apply now", "submit your cv", "register your cv", "browse jobs",
+        "search jobs", "hiring manager", "contract role", "day rate",
+    ),
+    "emlak": (
+        "for sale", "to let", "property for sale", "properties for sale",
+        "valuation", "market appraisal", "vendor", "asking price", "guide price",
+        "offers over", "viewing", "bedroom", "freehold", "leasehold",
+        "stamp duty", "conveyanc", "instruction", "landlord", "tenant",
+        "lettings", "sold stc", "under offer", "rightmove", "zoopla",
+    ),
+}
+SEKTOR_TERIMLERI = SEKTORLER["isealim"]     # geriye uyumluluk
 
 
-def sektor_skoru(metin_duz: str) -> int:
-    """Sayfada kac farkli ise-alim terimi geciyor.
+def sektor_skoru(metin_duz: str, sektor: str | tuple[str, ...] = "isealim") -> int:
+    """Sayfada kac farkli sektor terimi geciyor.
 
-    Olculdu (8 site): ise alim ajansi OLMAYAN uc firma da 0 aldi —
+    Olculdu (8 site, isealim): ise alim ajansi OLMAYAN uc firma da 0 aldi —
     connected-it.co.uk (donanim bayii), bureautechnicalservices.co.uk (denetim),
     digitalskills.com (danismanlik). Gercek ajanslar 5, 7 ve 11 aldi.
     Apps IT ve Stealth IT 1 aldi: gercek ajanslar ama ana sayfalari cok sade.
     Bu yuzden esik konmaz — yalnizca SIFIR ceza sayilir, gerisi disari verilir.
     """
-    return sum(1 for t in SEKTOR_TERIMLERI if t in metin_duz)
+    terimler = SEKTORLER.get(sektor, ()) if isinstance(sektor, str) else sektor
+    return sum(1 for t in terimler if t in metin_duz)
 
 @dataclass
 class DomainSonuc:
@@ -147,7 +162,8 @@ def _cozuluyor_mu(domain: str) -> bool:
 
 
 def dogrula(istemci: Istemci, domain: str, firma: str,
-            beklenen_ulke: str = "UK") -> tuple[str, str, str, str]:
+            beklenen_ulke: str = "UK",
+            sektor: str = "isealim") -> tuple[str, str, str, str]:
     """Sayfayi acar ve bu domainin GERCEKTEN o firmaya ait oldugunu sinar.
 
     YUKSEK  firmanin ayirt edici iki kelimesi sayfada bitisik gecer
@@ -175,13 +191,13 @@ def dogrula(istemci: Istemci, domain: str, firma: str,
     # SEKTORDE olabilir; ikisi de olculdu ve ikisi de gerceklesti.
     ulke = ulke_izi(duz)
     yanlis_ulke = beklenen_ulke and ulke != "?" and ulke != beklenen_ulke
-    skor = sektor_skoru(metin)
+    skor = sektor_skoru(metin, sektor)
 
     notlar = ""
     if yanlis_ulke:
         notlar += f" — DIKKAT: sayfa {ulke} gorunuyor, {beklenen_ulke} bekleniyordu"
     if skor == 0:
-        notlar += " — DIKKAT: sayfada hic ise alim dili yok, bu firma ajans olmayabilir"
+        notlar += f" — DIKKAT: sayfada hic {sektor} dili yok, bu firma o isi yapmiyor olabilir"
     supheli = yanlis_ulke or skor == 0
 
     kel = [k.lower() for k in _kelimeler(firma)]
@@ -207,7 +223,8 @@ def dogrula(istemci: Istemci, domain: str, firma: str,
 
 def domain_bul(istemci: Istemci, firma: str,
                tldler: tuple[str, ...] = TLD_VARSAYILAN,
-               beklenen_ulke: str = "UK") -> DomainSonuc:
+               beklenen_ulke: str = "UK",
+               sektor: str = "isealim") -> DomainSonuc:
     """Adaylari sirayla dener, ilk YUKSEK'i alir; yoksa en iyi ORTA'yi doner."""
     s = DomainSonuc(firma=firma)
     en_iyi: DomainSonuc | None = None
@@ -215,7 +232,7 @@ def domain_bul(istemci: Istemci, firma: str,
         if not _cozuluyor_mu(aday):
             continue
         s.denenen += 1
-        guven, baslik, kanit, ulke = dogrula(istemci, aday, firma, beklenen_ulke)
+        guven, baslik, kanit, ulke = dogrula(istemci, aday, firma, beklenen_ulke, sektor)
         if guven == "YUKSEK":
             s.domain, s.guven, s.baslik, s.kanit, s.ulke = \
                 aday, guven, baslik, kanit, ulke

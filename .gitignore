@@ -8,3 +8,10 @@ venv/
 *.csv
 bilisim-adlar.txt
 bilisim-domainler.txt
+epc-anahtar.txt
+epc-ornek.csv
+epc-m*.csv
+emlakci-*.csv
+emlak-domainler.txt
+emlakci-adlar.txt
+olcum-*.csv
